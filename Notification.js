@@ -1,95 +1,127 @@
 /* 更新内容：
  * 增加critical、volume参数设置
- * 增加关键词屏蔽参数
- * 更新日期 2024.11.14 14:28
+ * 增加关键词屏蔽参数，修改日志排版
+ * 更新日期 2024.11.18 19:42
  * 原作者 @Sliverkiss
  */
 
-const NAMESPACE = '通知'
+const NAMESPACE = '通知';
 let $ = new Env(NAMESPACE, {
     logLevel: 'info',
-    log() { },
-})
+    log() {},
+});
 
-let arg
+let arg;
 if (typeof $argument !== 'undefined') {
-    arg = Object.fromEntries($argument.split('&').map(item => item.split('=')))
+    arg = Object.fromEntries($argument.split('&').map(item => item.split('=')));
 } else {
-    arg = {}
+    arg = {};
 }
-$.info(`传入的 $argument: ${$.toStr(arg)}`)
+arg = { ...arg, ...$.getjson(NAMESPACE, {}) };
 
-const ignoreRegexStr = arg.ignoreRegex || '';  
-const ignoreRegex = ignoreRegexStr ? new RegExp(ignoreRegexStr) : null;
-
-arg = { ...arg, ...$.getjson(NAMESPACE, {}) }
-
-$.info(`从持久化存储读取参数后: ${$.toStr(arg)}`)
+$.info(formatLog(arg, "参数信息"));
 
 !(async () => {
-    $.info(`🔔 ${new Date().toLocaleString()}`)
-    $.info(JSON.stringify($event, null, 2))
-    
-    const {
-        name,
-        data: { title, subtitle, body, identifier },
-    } = $event
-    
+    $.info(formatLog($event, "通知信息"));
+
+    const { name, data } = $event;
+    const { title, subtitle, body, identifier } = data || {};
+
     const notificationContent = `${title} ${subtitle} ${body} ${identifier}`;
-    
+    const ignoreRegexStr = arg.ignoreRegex || '';
+    const ignoreRegex = ignoreRegexStr ? new RegExp(ignoreRegexStr) : null;
+
     if (ignoreRegex && ignoreRegex.test(notificationContent)) {
-        $.info(`忽略匹配正则的通知: ${notificationContent}`);
-        return $done(); 
+        $.info(formatLog({ title, body, identifier }, "忽略通知"));
+        return $done();
     }
 
     const barkBody = `${(subtitle ?? '').trim()}\n${(body ?? '').trim()}`.trim();
 
-    const BARK_URL = `https://api.day.app/${arg.BARK_TOKEN}/${encodeURIComponent(title)}/${encodeURIComponent(barkBody)}?group=${arg.group || 'Surge'}&automaticallyCopy=${arg.automaticallyCopy || 1}&isArchive=${arg.isArchive || 1}&icon=${decodeURIComponent(arg.icon) || 'https://raw.githubusercontent.com/xream/scripts/main/scriptable/surge/surge-dark.png'}&sound=${arg.sound || 'shake'}&level=${arg.level || 'active'}&volume=${arg.volume || 5}`
-
-    $.info(`BARK URL: ${BARK_URL}`)
+    const BARK_URL = `https://api.day.app/${arg.Bark_token}/${encodeURIComponent(title)}/${encodeURIComponent(barkBody)}?group=${arg.group || 'Surge'}&automaticallyCopy=${arg.automaticallyCopy || 1}&isArchive=${arg.isArchive || 1}&icon=${decodeURIComponent(arg.icon) || 'https://raw.githubusercontent.com/xream/scripts/main/scriptable/surge/surge-dark.png'}&sound=${arg.sound || 'shake'}&level=${arg.level || 'active'}&volume=${arg.volume || 5}`;
 
     await http({
         method: 'get',
         url: BARK_URL,
-    })
+    });
 })()
 .catch(async e => {
-    $.error(`❌ ${e.message || e}`)
-    $.error(e)
+    $.error(`❌ ${e.message || e}`);
+    $.error(e);
 })
 .finally(async () => {
-    $done()
-})
+    $done();
+});
 
-// 请求
+function formatLog(obj, title) {
+    const entries = Object.entries(obj).map(([key, value]) => {
+        if (value === undefined || value === null || value === '') {
+            return null;
+        }
+        if (typeof value === 'object' && Object.keys(value).length === 0) {
+            return null;
+        }
+        if (typeof value === 'object') {
+            value = formatObject(value);
+        }
+        return `├ ${key}:${value}`;
+    }).filter(Boolean);
+
+    if (entries.length > 0) {
+        entries[entries.length - 1] = entries[entries.length - 1].replace(/^├/, '└');
+    }
+
+    return `\n┌ ${title}\n${entries.join('\n')}\n`;
+}
+
+function formatObject(obj) {
+    const entries = Object.entries(obj).map(([key, value]) => {
+        if (typeof value === 'object' && value !== null) {
+            value = formatObject(value);
+        }
+        if (typeof value === 'string') {
+            value = key === 'body'
+                ? `\n${' '.repeat(8)}${value.replace(/\n/g, `\n${' '.repeat(8)}`)}`
+                : value;
+        }
+        return `    ├ ${key}:${value}`;
+    });
+
+    if (entries.length > 0) {
+        entries[entries.length - 1] = entries[entries.length - 1].replace(/^    ├/, '    └');
+    }
+
+    return `\n${entries.join('\n')}`;
+}
+
 async function http(opt = {}) {
-    const TIMEOUT = parseFloat(opt.timeout || $.lodash_get(arg, 'TIMEOUT') || 5)
-    const RETRIES = parseFloat(opt.retries || $.lodash_get(arg, 'RETRIES') || 1)
-    const RETRY_DELAY = parseFloat(opt.retry_delay || $.lodash_get(arg, 'RETRY_DELAY') || 1)
+    const TIMEOUT = parseFloat(opt.timeout || $.lodash_get(arg, 'TIMEOUT') || 5);
+    const RETRIES = parseFloat(opt.retries || $.lodash_get(arg, 'RETRIES') || 1);
+    const RETRY_DELAY = parseFloat(opt.retry_delay || $.lodash_get(arg, 'RETRY_DELAY') || 1);
 
-    let timeout = TIMEOUT + 1
-    timeout = $.isSurge() ? timeout : timeout * 1000
+    let timeout = TIMEOUT + 1;
+    timeout = $.isSurge() ? timeout : timeout * 1000;
 
-    let count = 0
+    let count = 0;
     const fn = async () => {
         try {
             if (TIMEOUT) {
                 return await Promise.race([
                     $.http.get({ ...opt, timeout }),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('HTTP TIMEOUT')), TIMEOUT * 1000)),
-                ])
+                ]);
             }
-            return await $.http.get(opt)
+            return await $.http.get(opt);
         } catch (e) {
             if (count < RETRIES) {
-                count++
-                $.log(`第 ${count} 次请求失败: ${e.message || e}, 等待 ${RETRY_DELAY}s 后重试`)
-                await $.wait(RETRY_DELAY * 1000)
-                return await fn()
+                count++;
+                $.log(`第 ${count} 次请求失败:${e.message || e}, 等待 ${RETRY_DELAY}s 后重试`);
+                await $.wait(RETRY_DELAY * 1000);
+                return await fn();
             }
         }
-    }
-    return await fn()
+    };
+    return await fn();
 }
 
 // prettier-ignore
